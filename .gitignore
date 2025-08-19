@@ -1,0 +1,29 @@
+# Ambiente virtuale Python
+# Non versionare mai le dipendenze, ma solo il file che le elenca (requirements.txt)
+venv/
+
+# Cache e file compilati di Python
+# Questi file vengono generati automaticamente da Python durante l'esecuzione
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# File di output e log
+# Generati dall'applicazione, non fanno parte del codice sorgente
+outputs/
+log.txt
+
+# Database
+# È buona pratica versionare lo schema (schema.sql) per ricrearlo,
+# ma non il file del database stesso che cambia continuamente.
+scansioni.db
+
+# File di configurazione locali e variabili d'ambiente
+# (Aggiungilo se in futuro userai un file .env per le chiavi API o altre configurazioni)
+.env
+
+# File specifici del sistema operativo o dell'editor
+.DS_Store
+.idea/
+.vscode/
