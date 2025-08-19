@@ -1,4 +1,4 @@
-# Web Audit SaaS - Backend
+# Web Audit SaaS - API
 
 Questo è il repository per il server backend del progetto "Web Audit SaaS", sviluppato per un tirocinio universitario. Il server è responsabile di ricevere le richieste di analisi di un dominio, eseguire gli script di scraping e audit, e salvare i risultati.
 
@@ -22,7 +22,7 @@ Prima di iniziare, assicurati di avere installato:
 Per avviare il server in modalità sviluppo, esegui lo script:
 
 ```bash
-./flash.sh
+./flash.sh start
 ```
 
 Il server sarà in ascolto all'indirizzo `http://127.0.0.1:5000`.
@@ -43,7 +43,7 @@ Una breve descrizione dei file principali:
 1.  **Clona il repository:**
 
     ```bash
-    git clone https://github.com/TUO_UTENTE/web-audit-saas-backend.git
+    git clone https://github.com/TUO_UTENTE/web-audit-saas-api.git
     cd web-audit-saas-backend
     ```
 
@@ -60,10 +60,10 @@ Una breve descrizione dei file principali:
     pip install -r requirements.txt
     ```
 
-    _(Nota: assicurati di creare un file `requirements.txt` con `pip freeze > requirements.txt`)_
+    _(Nota: file creato con `pip freeze > requirements.txt`)_
 
-4.  **Inizializza il database:**
+<!-- 4.  **Inizializza il database:**
     ```bash
     # Istruzioni per creare il db usando schema.sql
     # Esempio: sqlite3 scansioni.db < schema.sql
-    ```
+    ``` -->
