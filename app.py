@@ -9,10 +9,32 @@ from scraper import perform_scan # Importa la tua nuova funzione di scraping
 
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:4000"])
+# CORS(app, origins=["http://localhost:4000"]) # Permette CORS per il frontend
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:4000"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 DATABASE = 'scansioni.db'
 OUTPUT_DIR = 'outputs'
+
+# Per il debug delle richieste in arrivo
+# @app.before_request
+# def log_request():
+#      # Salviamo l'output in un file JSON.
+#     output_filename = f'debug.txt'
+#     output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+#     # Assicurati che la directory esista
+#     if not os.path.exists(OUTPUT_DIR):
+#         os.makedirs(OUTPUT_DIR)
+
+#     with open(output_path, 'w', encoding='utf-8') as f:
+#         json.dump((f"Metodo: {request.method}, Path: {request.path}, Headers: {dict(request.headers)}"), f, indent=4, ensure_ascii=False)
+
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
@@ -145,4 +167,4 @@ def get_result(scan_id):
 if __name__ == '__main__':
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True, host='0.0.0.0', port=5000)
