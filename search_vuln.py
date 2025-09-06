@@ -202,8 +202,6 @@ def search_cves(vendor, product, version, api_key):
         print(f"Errore: {e}")
         return []
 
-# API_KEY = "a255c57b3672d4b90a454442bf7c3e65c790ec3c.eyJzdWIiOjE0MDkxLCJpYXQiOjE3NTcwNjU1MDEsImV4cCI6MTc2NzEzOTIwMCwia2lkIjoxLCJjIjoibGw3VGJtNGtcL0hISmpBN1wvK1wvS0RsdmlSUmJMeG0rTnNLbEZkdCtVMVJENEdYeGxGRTE4VjRyREZKYXhiNnZ5K3lSdlk2b2JYRlE9PSJ9"
-
 # vendor = "Apache"
 # product = "http"
 # version = "2.4.59"
