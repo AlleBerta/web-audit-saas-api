@@ -5,6 +5,58 @@ import re
 import socket
 import nmap # <-- Importa la libreria nmap
 from search_vuln import search_cves, API_KEY # <-- Importa la funzione di ricerca vulnerabilità e la API_KEY
+# Per il parsing XML (sitemap)
+import xml.etree.ElementTree as ET
+import gzip, io, time
+
+COMMON_SITEMAP_PATHS = [
+    '/sitemap.xml',
+    '/sitemap_index.xml',
+    '/sitemap/sitemap.xml',
+    '/sitemap-index.xml',
+    '/sitemap1.xml',
+    '/sitemap.xml.gz',
+]
+
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+
+def parse_sitemap_xml(text):
+    urls = []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return urls
+    def strip_ns(tag): return tag.split('}')[-1].lower()
+    if strip_ns(root.tag) == 'sitemapindex':
+        for sm in root.findall('.//{*}sitemap'):
+            loc = sm.find('{*}loc')
+            if loc is not None and loc.text:
+                urls.append(loc.text.strip())
+    else:
+        for u in root.findall('.//{*}url'):
+            loc = u.find('{*}loc')
+            if loc is not None and loc.text:
+                urls.append(loc.text.strip())
+    return urls
+
+def fetch_sitemap(url_sitemap):
+    try:
+        r = requests.get(url_sitemap, headers=headers, timeout=8)
+        r.raise_for_status()
+        content = r.content
+        # gestisci gz
+        if url_sitemap.endswith('.gz') or content[:2] == b'\x1f\x8b':
+            buf = io.BytesIO(content)
+            with gzip.GzipFile(fileobj=buf) as gz:
+                text = gz.read().decode('utf-8', errors='ignore')
+        else:
+            text = r.text
+        return parse_sitemap_xml(text)
+    except Exception:
+        return []
+    
 
 
 # --- NUOVA FUNZIONE PER LA SCANSIONE DI RETE ---
@@ -94,15 +146,13 @@ def perform_scan(url):
     """
     Esegue una scansione web di base su un URL e restituisce i risultati in un dizionario.
     """
-    headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
 
     scan_results = {
         'url': url,
         'info': {},
         'security_headers': {},
         'robots_txt': {},
+        'sitemap': {},
         'terms_of_service': {'found': False, 'link': None},
         'custom_data': {}, # Per i dati specifici che vuoi estrarre
         'network_scan': {} # Per i risultati della scansione di rete
@@ -125,12 +175,10 @@ def perform_scan(url):
             scan_results['info']['allowed_methods'] = 'Errore durante la richiesta OPTIONS'
 
         print(f"scan_network_infrastructure({url}) ... ")
-        # === ESEGUI LA SCANSIONE DI RETE PRIMA DI TUTTO ===
-        # print(f"scan_network_infrastructure({url}, {response.headers['Server']}) ... ")
+        # 3. Eseguo la scansione di rete, trovo il server HTTP se presente e restituisco i risultati con eventuale ricerca CVE associata al server
         scan_results['network_scan'] = scan_network_infrastructure(url, http_headers=response.headers['Server'] if 'Server' in response.headers else None)
 
-
-        # 3. Controllo header di sicurezza comuni
+        # 4. Controllo header di sicurezza comuni
         security_headers_to_check = [
             'Content-Security-Policy',
             'Strict-Transport-Security',
@@ -140,7 +188,7 @@ def perform_scan(url):
         for header in security_headers_to_check:
             scan_results['security_headers'][header] = response.headers.get(header, 'Mancante')
 
-        # 4. Analisi HTML con BeautifulSoup
+        # 5. Analisi HTML con BeautifulSoup
         if 'text/html' in response.headers.get('Content-Type', ''):
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -162,7 +210,7 @@ def perform_scan(url):
             scan_results['custom_data']['h1_titles'] = h1_tags
             # ---------------------------------
 
-        # 5. Controllo robots.txt
+        # 6. Controllo robots.txt
         robots_url = urljoin(url, '/robots.txt')
         try:
             robots_response = requests.get(robots_url, headers=headers, timeout=5)
@@ -174,6 +222,85 @@ def perform_scan(url):
         except requests.exceptions.RequestException:
             scan_results['robots_txt']['found'] = False
             scan_results['robots_txt']['error'] = 'Impossibile raggiungere robots.txt'
+
+
+
+        # 7. Tentativo di trovare sitemap.xml
+        # Assumi root già calcolato: root = f"{parsed.scheme}://{parsed.netloc}"
+        parsed = urlparse(url)
+        root = f"{parsed.scheme}://{parsed.netloc}"
+
+        found_sitemaps = []
+        sitemap_urls_map = {}
+
+        # 1) Se robots_response esiste ed è 200, abbiamo già controllato robots.txt sopra:
+        if 'robots_response' in locals() and robots_response is not None and robots_response.status_code == 200:
+            for line in robots_response.text.splitlines():
+                if line.strip().lower().startswith('sitemap:'):
+                    loc = line.split(':', 1)[1].strip()
+                    loc = urljoin(root, loc)
+                    if loc not in found_sitemaps:
+                        found_sitemaps.append(loc)
+                        sitemap_urls_map[loc] = fetch_sitemap(loc)
+                        time.sleep(0.2) # breve pausa per non sovraccaricare
+
+        # 2) Prova percorsi comuni
+        for p in COMMON_SITEMAP_PATHS:
+            candidate = urljoin(root, p)
+            if candidate in found_sitemaps:
+                continue
+            try:
+                head = requests.head(candidate, headers=headers, timeout=5, allow_redirects=True)
+                if head.status_code in (200,301,302) or 'xml' in head.headers.get('Content-Type',''):
+                    urls = fetch_sitemap(candidate)
+                    if urls:
+                        found_sitemaps.append(candidate)
+                        sitemap_urls_map[candidate] = urls
+                time.sleep(0.2)
+            except Exception:
+                # fallback: prova GET diretto
+                urls = fetch_sitemap(candidate)
+                if urls:
+                    found_sitemaps.append(candidate)
+                    sitemap_urls_map[candidate] = urls
+                time.sleep(0.2)
+        
+        # 3) Scansiona la homepage per link a sitemap
+        try:
+            homepage_resp = requests.get(root, headers=headers, timeout=6)
+            if homepage_resp.status_code == 200 and 'text/html' in homepage_resp.headers.get('Content-Type',''):
+                soup_root = BeautifulSoup(homepage_resp.text, 'html.parser')
+                # <link rel="sitemap" href="...">
+                for link in soup_root.find_all('link', href=True):
+                    if 'sitemap' in link.get('href','').lower():
+                        loc = urljoin(root, link['href'])
+                        if loc not in found_sitemaps:
+                            urls = fetch_sitemap(loc)
+                            if urls:
+                                found_sitemaps.append(loc)
+                                sitemap_urls_map[loc] = urls
+                                time.sleep(0.2)
+                # <a href> con sitemap
+                for a in soup_root.find_all('a', href=True):
+                    if 'sitemap' in a['href'].lower() or 'sitemap.xml' in a['href'].lower():
+                        loc = urljoin(root, a['href'])
+                        if loc not in found_sitemaps:
+                            urls = fetch_sitemap(loc)
+                            if urls:
+                                found_sitemaps.append(loc)
+                                sitemap_urls_map[loc] = urls
+                                time.sleep(0.2)
+        except Exception:
+            pass
+
+        # Salva risultati nello scan_results (o dove preferisci)
+        scan_results['sitemap'] = {
+            'found_sitemaps': found_sitemaps,
+            'sitemap_urls_map': sitemap_urls_map
+        }
+
+
+
 
     except requests.exceptions.RequestException as e:
         scan_results['error'] = f"Errore durante la richiesta a {url}: {e}"

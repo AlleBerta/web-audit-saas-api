@@ -41,13 +41,16 @@ test_flask() {
     cd "$PROJECT_DIR" || exit 1
     source "$VENV_DIR/bin/activate"
     echo "----- Test scan: $(date) -----" >> "$TEST_LOG_FILE"
-    python app.py --test "http://sms.pingme.co.in" | tee -a "$TEST_LOG_FILE"
+    python app.py --test "http://www.backlinko.com" | tee -a "$TEST_LOG_FILE"
 }
 
 # http://www.example.com
 # http://www.montecchiocalcio.it
 # http://marcotrombi.com
 # https://sms.pingme.co.in
+# https://www.amazon.it
+# https://www.backlinko.com
+
 
 # === MAIN ===
 

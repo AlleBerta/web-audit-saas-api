@@ -46,7 +46,6 @@ for d in [OUTPUT_DIR, DIR_SCAN, DIR_TEST, DIR_RESULT]:
 #     with open(output_path, 'w', encoding='utf-8') as f:
 #         json.dump((f"Metodo: {request.method}, Path: {request.path}, Headers: {dict(request.headers)}"), f, indent=4, ensure_ascii=False)
 
-
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
