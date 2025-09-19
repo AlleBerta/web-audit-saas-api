@@ -3,7 +3,8 @@
 # === CONFIGURAZIONE ===
 PROJECT_DIR="/home/alleberta/flask-scan"
 VENV_DIR="$PROJECT_DIR/venv"
-LOG_FILE="$PROJECT_DIR/log.txt"
+LOG_FILE="$PROJECT_DIR/log.txt"             # log api    
+TEST_LOG_FILE="$PROJECT_DIR/test_log.txt"   # log test
 FLASK_APP="app.py"
 
 # === FUNZIONI ===
@@ -35,12 +36,26 @@ restart_flask() {
     start_flask
 }
 
+test_flask() {
+    echo "🧪 Avvio test scan..."
+    cd "$PROJECT_DIR" || exit 1
+    source "$VENV_DIR/bin/activate"
+    echo "----- Test scan: $(date) -----" >> "$TEST_LOG_FILE"
+    python app.py --test "http://sms.pingme.co.in" | tee -a "$TEST_LOG_FILE"
+}
+
+# http://www.example.com
+# http://www.montecchiocalcio.it
+# http://marcotrombi.com
+# https://sms.pingme.co.in
+
 # === MAIN ===
 
 # === Use Cases ===
 # ./flask.sh start
 # ./flask.sh stop
 # ./flask.sh restart
+# ./flask.sh test
 
 case "$1" in
     start)
@@ -52,8 +67,10 @@ case "$1" in
     restart)
         restart_flask
         ;;
-    *)
-        echo "❓ Utilizzo: $0 {start|stop|restart}"
-        exit 1
+    test) 
+        test_flask 
         ;;
+    *) 
+        echo "❓ Utilizzo: $0 {start|stop|restart|test}" ; 
+        exit 1 ;;
 esac

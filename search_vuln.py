@@ -10,7 +10,7 @@ API_KEY = os.getenv("CVEDETAILS_API_KEY")
 BASE_URL = os.getenv("BASE_URL","https://www.cvedetails.com") # fallback se non definito
 
 
-def get_version_id(vendor, product, version):
+def get_version_id(vendor, version, product=""):
     """
     Recupera il version_id a partire da vendor, product e version
     usando un redirect controllato.
@@ -177,7 +177,7 @@ def safe_float(value):
     except ValueError:
         return None
 
-def search_cves(vendor, product, version, api_key):
+def search_cves(vendor: str, version: str, api_key, product: str = "") -> list:
     """
     Flusso completo:
     1. Trova il version_id tramite redirect
@@ -185,8 +185,18 @@ def search_cves(vendor, product, version, api_key):
     3. Normalizza i dati per il database/frontend
     """
     try:
+        # Se product == "Apache httpd", prendo solo "Apache" come vendor e "httpd" come product
+        # Questo perché CVEDetails usa nomi specifici, tranne per casi noti come Apache httpd ...
+        if product == "Apache httpd":
+            vendor = "Apache"
+            product = "httpd"
         print(f"[*] Cerco version_id per {vendor} {product} {version}...")
-        version_id = get_version_id(vendor, product, version)
+        # controllo che i parametri non contengano spazi
+        # se ci sono, li sostituisco con %20
+        vendor = vendor.replace(" ", "%20") if vendor else ""
+        product = product.replace(" ", "%20") if product else ""
+        version = version.replace(" ", "%20") if version else ""
+        version_id = get_version_id(vendor, version)
         print(f"[+] Trovato version_id: {version_id}")
 
         print("[*] Recupero CVE associate a questa verione...")
@@ -209,5 +219,4 @@ def search_cves(vendor, product, version, api_key):
 # results = search_cves(vendor, product, version, API_KEY)
 
 # for vuln in results[:5]:
-#     print(f"{vuln['cve_id']} - {vuln['summary']} \n(Score EPSS: {vuln['epss']['score']})\t (Score CVSSv3: {vuln['cvss']['base_score_v3']})")
-#     print(f"Link: {vuln['url']}\n")
+#     print(f"{vuln}\n")

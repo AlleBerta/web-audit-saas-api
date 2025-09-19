@@ -6,8 +6,9 @@ import socket
 import nmap # <-- Importa la libreria nmap
 from search_vuln import search_cves, API_KEY # <-- Importa la funzione di ricerca vulnerabilità e la API_KEY
 
+
 # --- NUOVA FUNZIONE PER LA SCANSIONE DI RETE ---
-def scan_network_infrastructure(url):
+def scan_network_infrastructure(url, http_headers=None):
     """
     Esegue la scansione delle porte e dei servizi sull'host target.
     """
@@ -26,46 +27,59 @@ def scan_network_infrastructure(url):
         # argomenti scan più accurata = "-sS -sV -A -p 1-65535 -T4 -Pn" # -sS per SYN scan, -A per rilevamento OS e versioni, -p 1-65535 per tutte le porte
         # Scansioniamo le porte più comuni per velocità
         nm.scan(ip_address, arguments='-sV -T4 --top-ports 1000')
-        print('Salvo nm in un file di testo nm.txt')
-    
-        open_ports = []
+        founded_ports = []
         if ip_address in nm.all_hosts():
             host_data = nm[ip_address]
+            print(f"Host {ip_address} ({host_data.hostname()}) - Stato: {host_data.state()}")
             for proto in host_data.all_protocols():
-                ports = host_data[proto].keys()
-                for port in sorted(ports):
+                # Creo tre variabili per tenere traccia di service, product e version
+                vendor = product = version = None
+                for port in sorted(host_data[proto].keys()):
                     service_info = host_data[proto][port]
+                    print(f"Porta {port}/{proto} - Stato: {service_info['state']} - Servizio: {service_info.get('name', 'sconosciuto')} - Versione: {service_info.get('version', 'sconosciuta')}")
+                    
+                    port_details = {
+                        'port': port,
+                        'protocol': proto,
+                        'state': service_info['state'],
+                        'service': service_info.get('name', 'sconosciuto'),     # es: httpd
+                        'vendor': service_info.get('vendor', ''),               # es: Apache
+                        'product': service_info.get('product', ''),             # es: Apache httpd
+                        'version': service_info.get('version', '')              # es: 2.4.41
+                    }
+
+                    founded_ports.append(port_details)
+                    network_results['open_ports'] = founded_ports
+
+                    # Se il servizio è aperto, procediamo con la ricerca di vendor, product e version
                     if service_info['state'] == 'open':
-                        port_details = {
-                            'port': port,
-                            'protocol': proto,
-                            'service': service_info.get('name', 'sconosciuto'),
-                            'product': service_info.get('product', ''),
-                            'version': service_info.get('version', ''),
-                            'vulnerabilities': [] # Placeholder per le vulnerabilità
-                        }
                         
-                        # --- PUNTO DI INTEGRAZIONE PER LA RICERCA CVE ---
-                        # Se abbiamo prodotto e versione, possiamo cercare le vulnerabilità
-                        if port_details['product'] and port_details['version']:
-                            print(f"\n[!] Ricerca CVE per {port_details['product']} {port_details['version']}...\n")
+                        vendor = service_info.get('vendor', None)
+                        product = service_info.get('product', None)
+                        version = service_info.get('version', None)
 
-                            # Usiamo direttamente la funzione di search_vuln.py
-                            vulns = search_cves(
-                                vendor=port_details['product'],  # 🔹 Qui puoi aggiustare se serve vendor reale
-                                product=port_details['product'],
-                                version=port_details['version'],
-                                api_key=API_KEY
-                            )
+                        print(f"Dettagli servizio: {port_details}")
+            
+            # Finito di iterare sulle porte, procediamo con la ricerca CVE se abbiamo vendor e version
+            if not vendor or not version:
+                # Proviamo a dedurli dal nome del servizio
+                print(http_headers)
+            # --- PUNTO DI INTEGRAZIONE PER LA RICERCA CVE ---
+            print(f"\n[!] Ricerca CVE per {port_details['vendor']}, {port_details['product']} v{port_details['version']}...\n")
 
-                            # Salvo i risultati normalizzati dentro la struttura della porta
-                            port_details['vulnerabilities'] = vulns
+            # Usiamo direttamente la funzione di search_vuln.py
+            vulns = search_cves(
+                vendor=vendor,  
+                product=product,
+                version=version,
+                api_key=API_KEY
+            )
 
-                            print(f"[+] Trovate {len(vulns)} vulnerabilità per {port_details['product']} {port_details['version']}.\n")
-                        
-                        open_ports.append(port_details)
-        
-        network_results['open_ports'] = open_ports
+            # Salvo i risultati normalizzati dentro la struttura della porta
+            network_results['cve_search'] = vulns
+
+            print(f"[+] Trovate {len(vulns)} vulnerabilità per {port_details['product']} {port_details['version']}.\n")
+            
         print("Scansione Nmap completata.")
 
     except socket.gaierror:
@@ -73,12 +87,17 @@ def scan_network_infrastructure(url):
     except Exception as e:
         network_results['error'] = f"Errore durante la scansione Nmap: {e}"
 
+    print(f"network_results: {network_results}")
     return network_results
 
 def perform_scan(url):
     """
     Esegue una scansione web di base su un URL e restituisce i risultati in un dizionario.
     """
+    headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
     scan_results = {
         'url': url,
         'info': {},
@@ -88,13 +107,6 @@ def perform_scan(url):
         'custom_data': {}, # Per i dati specifici che vuoi estrarre
         'network_scan': {} # Per i risultati della scansione di rete
     }
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-
-    # === ESEGUI LA SCANSIONE DI RETE PRIMA DI TUTTO ===
-    scan_results['network_scan'] = scan_network_infrastructure(url)
 
     try:
         # 1. Richiesta principale e informazioni base
@@ -107,9 +119,16 @@ def perform_scan(url):
         # 2. Controllo metodi HTTP abilitati (con OPTIONS)
         try:
             options_response = requests.options(url, headers=headers, timeout=5)
+            print(f"OPTIONS response headers: {options_response.headers}")
             scan_results['info']['allowed_methods'] = options_response.headers.get('Allow', 'Non specificato (OPTIONS non supportato)')
         except requests.exceptions.RequestException:
             scan_results['info']['allowed_methods'] = 'Errore durante la richiesta OPTIONS'
+
+        print(f"scan_network_infrastructure({url}) ... ")
+        # === ESEGUI LA SCANSIONE DI RETE PRIMA DI TUTTO ===
+        # print(f"scan_network_infrastructure({url}, {response.headers['Server']}) ... ")
+        scan_results['network_scan'] = scan_network_infrastructure(url, http_headers=response.headers['Server'] if 'Server' in response.headers else None)
+
 
         # 3. Controllo header di sicurezza comuni
         security_headers_to_check = [
