@@ -9,6 +9,10 @@ FLASK_APP="app.py"
 
 # === FUNZIONI ===
 
+get_ip() {
+    hostname -I | awk '{print $1}'
+}
+
 start_flask() {
     echo "🟢 Avvio server Flask..."
     cd "$PROJECT_DIR" || exit 1
@@ -41,7 +45,7 @@ test_flask() {
     cd "$PROJECT_DIR" || exit 1
     source "$VENV_DIR/bin/activate"
     echo "----- Test scan: $(date) -----" >> "$TEST_LOG_FILE"
-    python app.py --test "http://www.backlinko.com" | tee -a "$TEST_LOG_FILE"
+    python app.py --test "https://corsineosin.mflabs.it" | tee -a "$TEST_LOG_FILE"
 }
 
 # http://www.example.com
@@ -50,6 +54,7 @@ test_flask() {
 # https://sms.pingme.co.in
 # https://www.amazon.it
 # https://www.backlinko.com
+# https://www.scanme.nmap.org
 
 
 # === MAIN ===
@@ -72,6 +77,9 @@ case "$1" in
         ;;
     test) 
         test_flask 
+        ;;
+    ip)
+        get_ip
         ;;
     *) 
         echo "❓ Utilizzo: $0 {start|stop|restart|test}" ; 

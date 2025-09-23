@@ -8,6 +8,9 @@ import time
 import json
 from datetime import datetime
 from scraper import perform_scan # Importa la tua nuova funzione di scraping
+import threading
+
+from server_response import server_response # Per eseguire lo scraping in un thread separato, in modo da non bloccare l'API
 
 
 app = Flask(__name__)
@@ -22,12 +25,11 @@ CORS(app, resources={
 
 DATABASE = 'scansioni.db'
 OUTPUT_DIR = 'outputs'
-DIR_SCAN = os.path.join(OUTPUT_DIR, 'scans')
-DIR_TEST = os.path.join(OUTPUT_DIR, 'tests')
+DIR_TEST = os.path.join(OUTPUT_DIR, 'test_results')
 DIR_RESULT = os.path.join(OUTPUT_DIR, 'results')
 
 # Crea le cartelle se non esistono
-for d in [OUTPUT_DIR, DIR_SCAN, DIR_TEST, DIR_RESULT]:
+for d in [OUTPUT_DIR, DIR_TEST, DIR_RESULT]:
     if not os.path.exists(d):
         os.makedirs(d)
 
@@ -51,7 +53,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
     
-def execute_and_save_scan(url, scan_id):
+def execute_and_save_scan(url: str, scan_id: int, isTest: bool = False):
     """
     Funzione esterna che esegue la scansione, gestisce gli errori
     e salva il risultato in un file JSON.
@@ -71,7 +73,7 @@ def execute_and_save_scan(url, scan_id):
             'scanTimestamp': str(datetime.now()),
             'scanResults': scan_results # Includiamo i risultati
         }
-
+        
     except Exception as e:
         # Se lo scraper fallisce, gestiamo l'errore
         print(f"Errore durante la scansione: {e}")
@@ -80,15 +82,26 @@ def execute_and_save_scan(url, scan_id):
 
     # Salviamo l'output in un file JSON.
     output_filename = f'scan_result_{scan_id}.json'
-    output_path = os.path.join((DIR_RESULT), output_filename)
+    if(isTest):
+        output_path = os.path.join((DIR_TEST), output_filename)
+    else:
+        output_path = os.path.join((DIR_RESULT), output_filename)
+        
 
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=4, ensure_ascii=False)
 
     print(f"Risultati salvati in: {output_path}")
     
-    # Restituiamo lo stato e il percorso per l'aggiornamento del DB
-    return status, output_path
+    # Aggiorna lo stato nel DB
+    conn = get_db_connection()
+    conn.execute('''
+        UPDATE scansioni
+        SET status = ?, pathOutput = ?, timestampEnd = ?
+        WHERE idScan = ?
+    ''', ('done', output_path, datetime.now(), scan_id))
+    conn.commit()
+    conn.close()
 
 
 def normalize_url(url: str) -> str:
@@ -125,18 +138,20 @@ def normalize_url(url: str) -> str:
 @app.route('/start-scan', methods=['POST', 'OPTIONS'])
 def start_scan():
     if request.method == "OPTIONS":
-        return '', 200  # Risposta vuota ma accettata per il preflight
+        return server_response(200, True, "Preflight OK")  # Risposta vuota ma accettata per il preflight
 
     data = request.get_json()
     url = data.get('url')
+    print(f"ricevuta richiesta: {url}")
 
     if not url:
-        return jsonify({'error': 'URL mancante'}), 400
+        return server_response(400, False, 'Url mancante')
 
     try:
         url = normalize_url(url)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return server_response(400, False, str(e))
+
     print(f"Normalized URL: {url}")
 
     conn = get_db_connection()
@@ -146,34 +161,22 @@ def start_scan():
     conn.commit()
     conn.close()
 
-    # Scraping web url
-    status, output_path = execute_and_save_scan(url, scan_id)
+    print(f"Scan ID: {scan_id}")    
+    # Avvio la scansione in background
+    thread = threading.Thread(target=execute_and_save_scan, args=(url, scan_id))
+    thread.start()
+
+    # Risposta immediata al client
+    return server_response(
+        200,
+        True,
+        'Scansione avviata',
+        {
+            'idScan': scan_id, 
+            'status': 'processing'
+        }
+    )
     
-    
-    output_data = {
-        'idScan': scan_id,
-        'url': url,
-        'result': f'Finta scansione completata per {url} con stato {status} e path {output_path}',
-        'timestamp': str(datetime.now())
-    }
-
-    output_filename = f'scan{scan_id}_{int(time.time())}.json'
-    output_path = os.path.join(DIR_SCAN, output_filename)
-
-    with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=4)
-
-    # Aggiorna lo stato nel DB
-    conn = get_db_connection()
-    conn.execute('''
-        UPDATE scansioni
-        SET status = ?, pathOutput = ?, timestampEnd = ?
-        WHERE idScan = ?
-    ''', ('done', output_path, datetime.now(), scan_id))
-    conn.commit()
-    conn.close()
-
-    return jsonify({'message': 'Scansione avviata', 'idScan': scan_id})
 
 @app.route('/scan-status/<int:scan_id>', methods=['GET'])
 def scan_status(scan_id):
@@ -182,15 +185,20 @@ def scan_status(scan_id):
     conn.close()
 
     if scan is None:
-        return jsonify({'error': 'Scan ID non trovato'}), 404
+        return server_response(404, False, 'ScanID not founded')
 
-    return jsonify({
-        'idScan': scan['idScan'],
-        'url': scan['url'],
-        'status': scan['status'],
-        'timestampStart': scan['timestampStart'],
-        'timestampEnd': scan['timestampEnd'],
-    })
+    return server_response(
+        200,
+        True,
+        '',
+        {
+            'idScan': scan['idScan'],
+            'url': scan['url'],
+            'status': scan['status'],
+            'timestampStart': scan['timestampStart'],
+            'timestampEnd': scan['timestampEnd'],
+        }
+    )
 
 @app.route('/result/<int:scan_id>', methods=['GET'])
 def get_result(scan_id):
@@ -199,15 +207,19 @@ def get_result(scan_id):
     conn.close()
 
     if scan is None:
-        return jsonify({'error': 'Scan ID non trovato'}), 404
+        return server_response(404, False, 'Scan ID not founded')
 
     if scan['status'] != 'done':
-        return jsonify({'error': 'Scansione non completata'}), 400
+        return server_response(400, False, 'Scan not completed')
 
     if not scan['pathOutput'] or not os.path.exists(scan['pathOutput']):
-        return jsonify({'error': 'File risultato non trovato'}), 404
+        return server_response(404, False, 'Output File not founded')
 
-    return send_file(scan['pathOutput'], mimetype='application/json')
+    # leggo il pathOutput
+    with open(scan['pathOutput'], "r", encoding="utf-8") as f:
+        file_data = json.load(f)
+
+    return server_response(200, True, 'Scansione terminated with success!', file_data)
 
 # Funzione di test per eseguire una scansione direttamente, non tramite API
 def test_scan(url: str):
@@ -227,34 +239,13 @@ def test_scan(url: str):
     conn.close()
 
     print(f"execute_and_save_scan({url},{scan_id})...")
-    # Esegui la scansione vera
-    status, output_path = execute_and_save_scan(url, scan_id)
 
-    output_data = {
-        'idScan': scan_id,
-        'url': url,
-        'result': f'Finta scansione completata per {url} con stato {status} e path {output_path}',
-        'timestamp': str(datetime.now())
-    }
+    # Avvio la scansione in background
+    thread = threading.Thread(target=execute_and_save_scan, args=(url, scan_id, DIR_TEST))
+    thread.start()
 
-    output_filename = f'test_scan{scan_id}_{int(time.time())}.json'
-    output_path = os.path.join(DIR_TEST, output_filename)
-
-    with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=4)
-
-    # Aggiorna lo stato nel DB
-    conn = get_db_connection()
-    conn.execute('''
-        UPDATE scansioni
-        SET status = ?, pathOutput = ?, timestampEnd = ?
-        WHERE idScan = ?
-    ''', ('done', output_path, datetime.now(), scan_id))
-    conn.commit()
-    conn.close()
-
-    return output_data
-
+    # Risposta immediata al client
+    return {'status': 200, 'message': 'Scansione avviata', 'data':{'idScan': scan_id, 'status': 'processing'}}
 
 
 if __name__ == '__main__':

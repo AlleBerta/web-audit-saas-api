@@ -139,7 +139,7 @@ def scan_network_infrastructure(url, http_headers=None):
     except Exception as e:
         network_results['error'] = f"Errore durante la scansione Nmap: {e}"
 
-    print(f"network_results: {network_results}")
+    # print(f"network_results: {network_results}")
     return network_results
 
 def perform_scan(url):
