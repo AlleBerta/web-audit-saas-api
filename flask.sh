@@ -19,7 +19,8 @@ start_flask() {
     source "$VENV_DIR/bin/activate"
     export FLASK_APP=$FLASK_APP
     echo "----- Avvio server: $(date) -----" >> "$LOG_FILE"
-    nohup flask run --host=0.0.0.0 >> "$LOG_FILE" 2>&1 &
+    nohup python3 app.py >> "$LOG_FILE" 2>&1 &
+    # nohup flask run --host=0.0.0.0 >> "$LOG_FILE" 2>&1 &  # In produzione, perché esegue in baground, disabilita output su terminale
     echo "✅ Server Flask avviato (in background)."
 }
 
@@ -27,7 +28,15 @@ stop_flask() {
     echo "🔴 Fermando il server Flask..."
     PIDS=$(ps aux | grep "[f]lask run" | awk '{print $2}')
     if [ -z "$PIDS" ]; then
-        echo "⚠️  Nessun processo Flask trovato."
+        PIDS=$(ps aux | grep "[p]ython3 $FLASK_APP" | awk '{print $2}')
+        if [ -z "$PIDS" ]; then
+            echo "$PIDS" | xargs kill
+            echo "✅ app.py fermato."
+            return
+        else
+            echo "⚠️  Nessun processo Flask trovato."
+            return
+        fi
     else
         echo "$PIDS" | xargs kill
         echo "✅ Server Flask fermato."
@@ -45,7 +54,7 @@ test_flask() {
     cd "$PROJECT_DIR" || exit 1
     source "$VENV_DIR/bin/activate"
     echo "----- Test scan: $(date) -----" >> "$TEST_LOG_FILE"
-    python app.py --test "https://corsineosin.mflabs.it" | tee -a "$TEST_LOG_FILE"
+    python app.py --test "https://filippopessina.it" | tee -a "$TEST_LOG_FILE"
 }
 
 # http://www.example.com
@@ -55,7 +64,7 @@ test_flask() {
 # https://www.amazon.it
 # https://www.backlinko.com
 # https://www.scanme.nmap.org
-
+# https://filippopessina.it
 
 # === MAIN ===
 

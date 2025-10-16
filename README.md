@@ -40,10 +40,10 @@ Una breve descrizione dei file principali:
 
 ## Installazione - Non aggiornato!!!
 
-1.  **Clona il repository:**
+1.  **Clona la repository:**
 
     ```bash
-    git clone https://github.com/TUO_UTENTE/web-audit-saas-api.git
+    git clone https://github.com/AlleBerta/web-audit-saas-api.git
     cd web-audit-saas-backend
     ```
 
