@@ -69,7 +69,7 @@ def failed_scan(scanId: int):
         conn = get_db_connection()
         cur = conn.cursor()
         conn.execute(
-            'UPDATE scans SET state = %s, end_time = %s WHERE id = %s',
+            'UPDATE scans SET state = %s, end_time = %s, updatedAt = NOW() WHERE id = %s',
             ('failed', datetime.now(), scanId)
         )
         conn.commit()
@@ -122,7 +122,7 @@ def failed_scan(scanId: int):
 #         conn = get_db_connection()
 #         cur = conn.cursor()
 #         conn.execute(
-#             'UPDATE scans SET state = %s, report_path = %s, end_time = %s WHERE id = %s',
+#             'UPDATE scans SET state = %s, report_path = %s, end_time = %s, updatedAt = NOW() WHERE id = %s',
 #             ('done', output_path, datetime.now(), scanId)
 #         )
 #         conn.commit()
@@ -313,7 +313,7 @@ def start_scan():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'UPDATE scans SET state =%s, start_time =%s WHERE id=%s',
+        'UPDATE scans SET state =%s, start_time =%s, updatedAt = NOW() WHERE id=%s',
         ('running', datetime.now(), scanId)
     )
     conn.commit()
@@ -397,7 +397,7 @@ def test_scan(url: str):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'INSERT INTO scans (targetId, state, startTime) VALUES (%s, %s, %s)',
+        'INSERT INTO scans (targetId, state, startTime, createdAt, updatedAt) VALUES (%s, %s, %s, NOW(), NOW())',
         (targetId, 'processing', datetime.now())
     )
     scanId = cur.lastrowid
