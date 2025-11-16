@@ -356,7 +356,7 @@ def run_pentest_scan(url: str, scanId: int):
         cur.execute(
             """
             UPDATE scans
-            SET state = %s, report_path = %s, end_time = NOW(), updatedAt = NOW()
+            SET state = %s, pentest_path = %s, end_time = NOW(), updatedAt = NOW()
             WHERE id = %s
             """,
             ("done", output_path, scanId)
