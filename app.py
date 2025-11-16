@@ -11,6 +11,8 @@ from scraper import perform_scan # Importa la tua nuova funzione di scraping
 import threading
 from dotenv import load_dotenv
 from server_response import server_response # Per eseguire lo scraping in un thread separato, in modo da non bloccare l'API
+import subprocess
+import xml.etree.ElementTree as ET
 
 load_dotenv()  # Carica le variabili d'ambiente dal file .env
 
@@ -28,9 +30,10 @@ DATABASE = 'scansioni.db'
 OUTPUT_DIR = 'outputs'
 DIR_TEST = os.path.join(OUTPUT_DIR, 'test_results')
 DIR_RESULT = os.path.join(OUTPUT_DIR, 'results')
+DIR_PENTEST= os.path.join(OUTPUT_DIR, 'pentests')
 
 # Crea le cartelle se non esistono
-for d in [OUTPUT_DIR, DIR_TEST, DIR_RESULT]:
+for d in [OUTPUT_DIR, DIR_TEST, DIR_RESULT, DIR_PENTEST]:
     if not os.path.exists(d):
         os.makedirs(d)
 
@@ -152,7 +155,7 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
         output_data = {'idScan': scanId, 'error': str(e)}
         status = 'failed'
     else:
-        status = 'done'
+        status = 'running' # Mantengo running perché devo ancora fare la parte del Pentest
 
     # Salvataggio su file
     output_filename = f'scan_result_{scanId}.json'
@@ -161,7 +164,7 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=4, ensure_ascii=False)
 
-    print(f"Risultati salvati in: {output_path}")
+    print(f"Risultati 1° parte salvati in: {output_path}")
 
     # === Aggiornamento DB ===
     try:
@@ -172,10 +175,10 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
         cur.execute(
             """
             UPDATE scans
-            SET state = %s, report_path = %s, end_time = %s, updatedAt = NOW()
+            SET state = %s, report_path = %s, updatedAt = NOW()
             WHERE id = %s
             """,
-            (status, output_path, output_data.get("scanTimestamp"), scanId)
+            (status, output_path, scanId)
         )
         print("Poi aggiorno targets")
         # 2. Aggiorna targets (recupero id_target associato alla scansione)
@@ -205,13 +208,13 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
 
         def severity_from_score(score):
             if score < 2.5:
-                return "Low"
+                return "low"
             elif score < 5:
-                return "Medium"
+                return "medium"
             elif score < 7.5:
-                return "High"
+                return "high"
             else:
-                return "Critical"
+                return "critical"
 
         if isinstance(cve_list, list):
             for cve in cve_list:
@@ -237,21 +240,159 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
     except Exception as e:
         print(f"❌ Errore durante l'aggiornamento del database: {e}")
         conn.rollback()
+        conn.close()
 
+        update_scan_status(scanId, "failed")
+
+    finally:
+
+        run_pentest_scan(url, scanId)
+
+        print("SCANSIONE TERMIANTA")
+
+def run_pentest_scan(url: str, scanId: int):
+    """
+    Esegue una scansione di penetration test con ZAP, 
+    salva i risultati in scan_results e aggiorna lo stato della scansione."""
+    print(f"Avvio penetration test ZAP per l'URL: {url}")
+    
+    # === 0. Preparo i path e il file xml di ouput ===
+    output_filename = f'zap_result_{scanId}.xml'
+    output_path = os.path.join(DIR_PENTEST, output_filename)
+    
+    # === 1. Eseguo la scansione ZAP ===
+    proc = subprocess.run(
+        ["/opt/zaproxy/zap.sh", "-cmd", "-quickurl", url],
+        capture_output=True, text=True
+    )
+
+    # === 2. Controllo l'exit code ===
+    if proc.returncode !=0:
+        print("❌ Errore durante l'esecuzione di ZAP")
+        print("🔍 Codice di uscita:", proc.returncode)
+
+        if proc.stderr.strip():
+            print("\n--- STDERR ---")
+            print(proc.stderr)
+        else:
+            print("Nessun output su stderr.")
+
+        update_scan_status(scanId, "failed")
+        return
+
+    # === 3. Salvo l'output XML sul file ===
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(proc.stdout)
+
+    # === 4. Parse del file XML ===
+    try:
+        # Leggo il file intero
+        with open(output_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Cerco dove inizia la parte XML vera
+        # Ogni file contiene tre righe iniziali di log prima della dichiarazione XML
+        # Found Java version 21.0.8
+        # Available memory: 19999 MB
+        # Using JVM args: -Xmx4999m
+        # Quindi cerco la prima occorrenza di <?xml
+        xml_start = content.find("<?xml")
+        if xml_start == -1:
+            raise ValueError("File XML non contiene la dichiarazione <?xml")
+        
+        content = content[xml_start:]
+
+    except Exception as e:
+        print(f"❌ Errore lettura/parsing del report XML: {e}")
+        update_scan_status(scanId, "failed")
+        return
+    
+    # === 5. Inserisco i campi nella tabella `scan_results` ===
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        root = ET.fromstring(content)
+        alerts = root.findall(".//alertitem")
+        print(f"Trovati {len(alerts)} alert nel report ZAP.")
+
+
+        for alert in alerts:
+            name = alert.findtext("name", "Unknown")
+            riskcode = alert.findtext("riskcode", "0")
+            desc = alert.findtext("desc", "No description")
+
+            # Mappatura riskcode → severity
+            severity_map = {
+                "0": "low",
+                "1": "critical",
+                "2": "medium",
+                "3": "high"
+            }
+            severity = severity_map.get(riskcode, "low")
+
+            instances = alert.findall(".//instance/uri")
+            if instances:
+                for uri_elem in instances:
+                    uri = uri_elem.text or "N/A"
+                    cur.execute(
+                        """
+                        INSERT INTO scan_results (scanId, vulnerabilityType, severity, description, urlAffected, createdAt, updatedAt)
+                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                        """,
+                        (scanId, name, severity, desc, uri)
+                    )
+            else:
+                # se non ci sono instance → inserisco senza url
+                cur.execute(
+                    """
+                    INSERT INTO scan_results (scanId, vulnerabilityType, severity, description, createdAt, updatedAt)
+                    VALUES (%s, %s, %s, %s, NOW(), NOW())
+                    """,
+                    (scanId, name, severity, desc)
+                )
+        
+        # === 5. Aggiorna stato della scansione principale ===
         cur.execute(
             """
             UPDATE scans
-            SET state = %s, end_time = %s, updatedAt = NOW()
+            SET state = %s, report_path = %s, end_time = NOW(), updatedAt = NOW()
             WHERE id = %s
             """,
-            ('failed', output_data.get("scanTimestamp"), scanId)
+            ("done", output_path, scanId)
+        )
+
+        conn.commit()
+        print(f"✅ Inseriti {len(alerts)} alert ZAP nel database.")
+        conn.close()
+        print(f"Penetration test completato per la scansione {scanId}.")
+    except Exception as e:
+        print(f"❌ Errore durante il parsing del report XML: {e}")
+        conn.rollback()
+        conn.close()
+        update_scan_status(scanId, "failed")
+        return
+
+def update_scan_status(scanId: int, status: str):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+    
+        cur.execute(
+            """
+            UPDATE scans
+            SET state = %s, end_time = NOW(), updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (status, scanId)
         )
         conn.commit()
-
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore aggiornando stato scansione: {e}")
     finally:
         conn.close()
 
-    print("SCANSIONE TERMIANTA")
 
 def normalize_url(url: str) -> str:
     # Aggiungi schema se manca
