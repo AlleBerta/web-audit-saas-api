@@ -207,13 +207,13 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
         )
 
         def severity_from_score(score):
-            if score < 2:
-                return "info"
-            elif score < 4:
+            if score == 0:
+                return "info" # nessuna gravità
+            if score < 4:
                 return "low"
-            elif score < 6:
+            elif score < 7:
                 return "medium"
-            elif score < 8:
+            elif score < 9:
                 return "high"
             else:
                 return "critical"
@@ -322,6 +322,7 @@ def run_pentest_scan(url: str, scanId: int):
         for alert in alerts:
             name = alert.findtext("name", "Unknown")
             riskcode = alert.findtext("riskcode", "0")
+            confidence = alert.findtext("confidence", "0")
             desc = alert.findtext("desc", "No description")
 
             # Mappatura riskcode → severity
@@ -329,9 +330,17 @@ def run_pentest_scan(url: str, scanId: int):
                 "0": "info",
                 "1": "low",
                 "2": "medium",
-                "3": "high"
+                "3": "high",
+                "4": "critical" # non compare mai in ZAP, la aggiungo per parità con gli altri tool
             }
+
+                
             severity = severity_map.get(riskcode, "low")
+            # Aggiustamenti particolari: se trovo un riskcode 3 (high)
+            # con confidence 3 o 4, lo alzo a critical, per pareggiare la gravità con altri tool che hanno presente questo campo
+            if (riskcode=="3" and (confidence == "3" or confidence=="4")):
+                severity = "critical"
+
 
             instances = alert.findall(".//instance/uri")
             if instances:
