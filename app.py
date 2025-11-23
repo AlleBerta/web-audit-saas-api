@@ -207,11 +207,13 @@ def execute_and_save_scan(url: str, scanId: int, isTest: bool = False):
         )
 
         def severity_from_score(score):
-            if score < 2.5:
+            if score < 2:
+                return "info"
+            elif score < 4:
                 return "low"
-            elif score < 5:
+            elif score < 6:
                 return "medium"
-            elif score < 7.5:
+            elif score < 8:
                 return "high"
             else:
                 return "critical"
@@ -303,7 +305,7 @@ def run_pentest_scan(url: str, scanId: int):
         content = content[xml_start:]
 
     except Exception as e:
-        print(f"❌ Errore lettura/parsing del report XML: {e}")
+        print(f"Errore lettura/parsing del report XML: {e}")
         update_scan_status(scanId, "failed")
         return
     
@@ -324,8 +326,8 @@ def run_pentest_scan(url: str, scanId: int):
 
             # Mappatura riskcode → severity
             severity_map = {
-                "0": "low",
-                "1": "critical",
+                "0": "info",
+                "1": "low",
                 "2": "medium",
                 "3": "high"
             }
@@ -363,7 +365,7 @@ def run_pentest_scan(url: str, scanId: int):
         )
 
         conn.commit()
-        print(f"✅ Inseriti {len(alerts)} alert ZAP nel database.")
+        print(f"Inseriti {len(alerts)} alert ZAP nel database.")
         conn.close()
         print(f"Penetration test completato per la scansione {scanId}.")
     except Exception as e:
