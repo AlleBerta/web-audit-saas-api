@@ -180,10 +180,21 @@ def perform_scan(url):
 
         # 4. Controllo header di sicurezza comuni
         security_headers_to_check = [
+            # --- I Classici (La tua lista originale) ---
             'Content-Security-Policy',
             'Strict-Transport-Security',
             'X-Content-Type-Options',
-            'X-Frame-Options'
+            'X-Frame-Options',
+            'Permissions-Policy',      # Sostituisce la vecchia Feature-Policy
+            'Referrer-Policy',
+
+            # --- I Nuovi Consigliati (Moderni & Critici) ---
+            'Cache-Control',               # Fondamentale per dati sensibili
+            'Set-Cookie',                  # Per controllare i flag (Secure, HttpOnly, SameSite)
+            'Access-Control-Allow-Origin', # Per controllare misconfigurazioni CORS
+            'Cross-Origin-Opener-Policy',  # (COOP) Isolamento processi
+            'Cross-Origin-Embedder-Policy',# (COEP) Isolamento risorse
+            'Cross-Origin-Resource-Policy' # (CORP) Protezione risorse cross-origin
         ]
         for header in security_headers_to_check:
             scan_results['security_headers'][header] = response.headers.get(header, 'Mancante')
